@@ -1,0 +1,25 @@
+[
+  {
+    "ticket_id": "T-1001",
+    "customer": "Alice Corp",
+    "issue": "Cluster connection timeout",
+    "messages": [
+      {"role": "user", "content": "I cannot connect to my cluster c-123 in us-east-1."},
+      {"role": "agent", "content": "Hello! I see that c-123 is currently in 'maintenance' mode. It should be back in 10 minutes."},
+      {"role": "user", "content": "Oh, I missed the notification. Thanks."}
+    ],
+    "resolution": "Educated user about maintenance window."
+  },
+  {
+    "ticket_id": "T-1002",
+    "customer": "Bob Inc",
+    "issue": "Billing question",
+    "messages": [
+      {"role": "user", "content": "Why was I charged $500 this month?"},
+      {"role": "agent", "content": "You exceeded the 100 req/sec rate limit multiple times, triggering the overage tier."},
+      {"role": "user", "content": "I see. Can I upgrade to Enterprise?"},
+      {"role": "agent", "content": "Yes, I can forward you to sales."}
+    ],
+    "resolution": "Forwarded to sales."
+  }
+]

@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m venv:*)",
+      "Bash(venvScriptspython.exe -m pip install --upgrade pip)",
+      "Bash(\"venv/Scripts/python.exe\" -m pip install --upgrade pip)",
+      "Bash(\"venv/Scripts/pip.exe\" install -r requirements.txt)",
+      "Bash(\"venv/Scripts/pip.exe\" show chainlit)",
+      "Bash(\"venv/Scripts/pip.exe\" index versions chainlit)",
+      "Bash(\"venv/Scripts/pip.exe\" download --no-deps chainlit==2.9.3)",
+      "Bash(\"venv/Scripts/pip.exe\" show -f chainlit)",
+      "Bash(\"venv/Scripts/python.exe\":*)",
+      "Bash(\"venv/Scripts/python.exe\" train.py --verbose --test-queries \"Python developer\" \"AWS experience\" \"Java skills\")",
+      "Bash(\"venv/Scripts/python.exe\" train.py --verbose)",
+      "Bash(\"venv/Scripts/python.exe\" train.py)",
+      "Bash(\"venv/Scripts/python.exe\" -c \"from langchain_classic.retrievers import ParentDocumentRetriever; import inspect; print(inspect.getsource(ParentDocumentRetriever.invoke))\")",
+      "Bash(\"venv/Scripts/python.exe\" -c \"from langchain_classic.retrievers import ParentDocumentRetriever; import inspect; print(inspect.getsource(ParentDocumentRetriever._get_relevant_documents))\")",
+      "Bash(\"venv/Scripts/python.exe\" -m pip install ipykernel jupyter)",
+      "Bash(\"venv/Scripts/python.exe\" -m ipykernel install --user --name=rag-training --display-name=\"Python (RAG Training)\")",
+      "Bash(\"venv/Scripts/python.exe\" test_storage_import.py)",
+      "Bash(\"venv/Scripts/python.exe\" test_storage_detailed.py)",
+      "Bash(\"venv/Scripts/python.exe\" test_file_store.py)",
+      "Bash(del test_storage_import.py test_storage_detailed.py test_file_store.py)",
+      "Bash(\"venv/Scripts/python.exe\" -c \"from langchain_classic.retrievers import ParentDocumentRetriever; import inspect; print(inspect.getsource(ParentDocumentRetriever._split_docs_for_adding))\")",
+      "Bash(\"venv/Scripts/python.exe\" -c \"from langchain_classic.storage.file_system import LocalFileStore; import inspect; print(inspect.getsource(LocalFileStore.mset))\")"
+    ]
+  }
+}

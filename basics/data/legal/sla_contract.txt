@@ -1,0 +1,20 @@
+SERVICE LEVEL AGREEMENT (SLA) for NebulaDB Enterprise
+
+1. DEFINITIONS
+"Uptime" refers to the availability of the Service during a billing month.
+"Downtime" refers to a period of time exceeding 5 minutes where the Error Rate is greater than 5%.
+
+2. SERVICE COMMITMENT
+NebulaDB commits to a Monthly Uptime Percentage of at least 99.99% ("Service Commitment").
+
+3. SERVICE CREDITS
+If we do not meet the Service Commitment, you will be eligible to receive a Service Credit as follows:
+- < 99.99% but >= 99.0%: 10% Credit
+- < 99.0% but >= 95.0%: 25% Credit
+- < 95.0%: 100% Credit
+
+4. EXCLUSIONS
+The Service Commitment does not apply to any unavailability, suspension, or termination of NebulaDB performance issues: (i) caused by factors outside of our reasonable control, including any force majeure event or Internet access or related problems beyond the demarcation point of NebulaDB.
+
+5. CLAIMS
+To receive a Service Credit, you must submit a claim by opening a case in the NebulaDB Support Center within 30 days of the incident.
