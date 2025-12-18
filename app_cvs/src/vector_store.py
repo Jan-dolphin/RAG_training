@@ -66,10 +66,11 @@ class VectorStoreManager:
         self._vectorstore = Chroma(
             embedding_function=self.embeddings,
             collection_name=self.config.collection_name,
-            persist_directory=self.config.persist_directory
+            persist_directory=self.config.persist_directory,
+            collection_metadata={"hnsw:space": "cosine"}  # Use cosine similarity for text-embedding-ada-002
         )
 
-        logger.info("Empty vector store created")
+        logger.info("Empty vector store created with cosine similarity metric")
         return self._vectorstore
 
     def load_vectorstore(self) -> Optional[Chroma]:

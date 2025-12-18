@@ -14,6 +14,7 @@ from langchain_core.stores import BaseStore
 
 from .config import RAGConfig, AzureConfig
 from .models import RetrievalResult
+from .hybrid_retriever import HybridRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ class CVParentRetriever:
         self.vectorstore = vectorstore
         self.azure_config = azure_config
         self._retriever = None
+        self._hybrid_retriever = None
 
         # Setup persistent docstore with Document wrapper
         docstore_path = Path(config.persist_directory) / "docstore"
@@ -100,7 +102,8 @@ class CVParentRetriever:
         logger.info(
             f"Initializing Parent Retriever - "
             f"Parent chunks: {config.parent_chunk_size}, "
-            f"Child chunks: {config.child_chunk_size}"
+            f"Child chunks: {config.child_chunk_size}, "
+            f"Hybrid search: {config.use_hybrid_search}"
         )
         logger.info(f"Docstore path: {docstore_path}")
 
@@ -147,6 +150,18 @@ class CVParentRetriever:
             self._retriever.add_documents(documents)
 
         logger.info("Parent retriever initialized successfully")
+
+        # Initialize hybrid retriever if enabled
+        if self.config.use_hybrid_search:
+            logger.info("Initializing hybrid retriever (BM25 + Embeddings)")
+            # Get all parent documents for BM25 index
+            parent_docs = self._get_all_parent_documents()
+            self._hybrid_retriever = HybridRetriever(
+                config=self.config,
+                vectorstore=self.vectorstore,
+                documents=parent_docs
+            )
+            logger.info("Hybrid retriever initialized")
 
         # Log statistics
         try:
@@ -219,6 +234,22 @@ class CVParentRetriever:
 
         logger.info(f"All {total_chunks} child chunks processed successfully in {batch_num} batches")
 
+    def _get_all_parent_documents(self) -> List[Document]:
+        """
+        Get all parent documents from docstore for BM25 indexing
+
+        Returns:
+            List of all parent documents
+        """
+        parent_docs = []
+        for key in self.docstore.yield_keys():
+            docs = self.docstore.mget([key])
+            if docs and docs[0]:
+                parent_docs.append(docs[0])
+
+        logger.info(f"Retrieved {len(parent_docs)} parent documents from docstore")
+        return parent_docs
+
     def load_from_existing_store(self) -> None:
         """
         Load retriever from existing vector store and docstore.
@@ -237,6 +268,17 @@ class CVParentRetriever:
             parent_splitter=parent_splitter
         )
 
+        # Initialize hybrid retriever if enabled
+        if self.config.use_hybrid_search:
+            logger.info("Initializing hybrid retriever from existing store")
+            parent_docs = self._get_all_parent_documents()
+            self._hybrid_retriever = HybridRetriever(
+                config=self.config,
+                vectorstore=self.vectorstore,
+                documents=parent_docs
+            )
+            logger.info("Hybrid retriever loaded")
+
         # Log statistics
         try:
             child_count = self.vectorstore._collection.count()
@@ -251,6 +293,9 @@ class CVParentRetriever:
         """
         Retrieve relevant CV documents for query
 
+        Uses hybrid search (BM25 + embeddings) if enabled, otherwise falls back to
+        parent document retriever.
+
         Args:
             query: Search query (e.g., "candidates with Python skills")
             top_k: Number of results to return (uses config default if None)
@@ -263,13 +308,16 @@ class CVParentRetriever:
 
         k = top_k or self.config.top_k
 
-        logger.info(f"Retrieving documents for query: '{query}' (top {k})")
-
-        # Use ParentDocumentRetriever to get parent chunks
-        results = self._retriever.invoke(query)
-
-        # Limit to top_k
-        results = results[:k]
+        # Use hybrid search if enabled
+        if self.config.use_hybrid_search and self._hybrid_retriever:
+            logger.info(f"Using HYBRID search for query: '{query}' (top {k})")
+            results = self._hybrid_retriever.retrieve(query, top_k=k)
+        else:
+            logger.info(f"Using standard retrieval for query: '{query}' (top {k})")
+            # Use ParentDocumentRetriever to get parent chunks
+            results = self._retriever.invoke(query)
+            # Limit to top_k
+            results = results[:k]
 
         logger.info(f"Retrieved {len(results)} parent documents")
 
@@ -345,6 +393,8 @@ class CVParentRetriever:
             else:
                 filtered_count += 1
 
+        logger.info(f"Threshold filtering: {len(relevant_child_docs)} passed, {filtered_count} rejected (threshold={max_score})")
+
         # Limit to top_k after filtering
         relevant_child_docs = relevant_child_docs[:k]
 
@@ -382,13 +432,26 @@ class CVParentRetriever:
             child_count = self.vectorstore._collection.count()
             parent_count = len(list(self.docstore.yield_keys()))
 
-            return {
+            stats = {
                 "status": "initialized" if self._retriever else "not_initialized",
                 "parent_chunks": parent_count,
                 "child_chunks": child_count,
                 "parent_chunk_size": self.config.parent_chunk_size,
-                "child_chunk_size": self.config.child_chunk_size
+                "child_chunk_size": self.config.child_chunk_size,
+                "hybrid_search": self.config.use_hybrid_search
             }
+
+            # Add hybrid search stats if enabled
+            if self.config.use_hybrid_search and self._hybrid_retriever:
+                stats.update({
+                    "bm25_enabled": True,
+                    "bm25_weight": self.config.bm25_weight,
+                    "embedding_weight": self.config.embedding_weight
+                })
+            else:
+                stats["bm25_enabled"] = False
+
+            return stats
         except Exception as e:
             logger.error(f"Error getting stats: {e}")
             return {"status": "error", "error": str(e)}

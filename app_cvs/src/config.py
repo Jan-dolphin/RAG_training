@@ -46,7 +46,18 @@ class RAGConfig:
 
     # Retrieval settings
     top_k: int = 5  # Počet dokumentů k vrácení
-    similarity_threshold: float = 1.5  # Max distance pro relevantní výsledky (nižší = přísnější)
+
+    # Hybrid search settings
+    use_hybrid_search: bool = True  # Kombinuje BM25 (keyword) + embeddings (semantic)
+    bm25_k: int = 10  # Počet výsledků z BM25 keyword search
+    embedding_k: int = 10  # Počet výsledků z embedding search
+    bm25_weight: float = 0.5  # Váha BM25 při fúzi (0.0-1.0)
+    embedding_weight: float = 0.5  # Váha embeddings při fúzi (0.0-1.0)
+
+    # Similarity threshold (používá se pro non-hybrid fallback)
+    similarity_threshold: float = 0.4  # Max cosine distance pro relevantní výsledky
+    # Poznámka: ChromaDB používá cosine similarity
+    # 0.0-0.3: velmi relevantní, 0.3-0.5: relevantní, >0.5: často irelevantní
 
     # Vector store settings
     collection_name: str = "cv_candidates"

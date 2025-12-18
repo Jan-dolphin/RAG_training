@@ -22,7 +22,8 @@
       "Bash(\"venv/Scripts/python.exe\" test_file_store.py)",
       "Bash(del test_storage_import.py test_storage_detailed.py test_file_store.py)",
       "Bash(\"venv/Scripts/python.exe\" -c \"from langchain_classic.retrievers import ParentDocumentRetriever; import inspect; print(inspect.getsource(ParentDocumentRetriever._split_docs_for_adding))\")",
-      "Bash(\"venv/Scripts/python.exe\" -c \"from langchain_classic.storage.file_system import LocalFileStore; import inspect; print(inspect.getsource(LocalFileStore.mset))\")"
+      "Bash(\"venv/Scripts/python.exe\" -c \"from langchain_classic.storage.file_system import LocalFileStore; import inspect; print(inspect.getsource(LocalFileStore.mset))\")",
+      "Bash(\"venv/Scripts/pip.exe\" show langchain langchain-community)"
     ]
   }
 }

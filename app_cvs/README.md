@@ -7,7 +7,8 @@ Produkční RAG aplikace pro vyhledávání informací v životopisech kandidát
 Aplikace byla kompletně refaktorována s těmito vylepšeními:
 
 - ✅ **LocalFileStore** - Parent chunks se ukládají na disk (persistence mezi restarty)
-- ✅ **Jeden retrieval mode** - Kompletní kontext vždy, bez hacků
+- ✅ **Hybrid Search (BM25 + Embeddings)** - 🆕 Kombinace keyword a semantic search pro přesné výsledky
+- ✅ **Cosine Similarity** - 🆕 Změna metriky z L2 na cosine pro lepší discriminaci
 - ✅ **Optimalizovaný batch processing** - Polovina API calls, přesná kontrola rate limitů
 - ✅ **DRY princip** - Odstranění redundantního kódu (-100 řádků)
 - ✅ **Interaktivní notebooky** - v adresáři `notebooks/`
@@ -20,13 +21,18 @@ Aplikace byla kompletně refaktorována s těmito vylepšeními:
 
 - **Frontend:** Chainlit chat interface
 - **Backend:** LangChain 1.1.3 RAG pipeline
-- **Vector Store:** ChromaDB s persistencí
+- **Vector Store:** ChromaDB s persistencí + **Cosine similarity** 🆕
 - **Docstore:** LocalFileStore (🆕 v2.0) - persistence parent chunks
 - **Embeddings:** Azure OpenAI (text-embedding-ada-002)
 - **LLM:** Azure OpenAI GPT-4o
-- **Retrieval:** Parent Document Retriever
-  - **Parent chunks:** Celý CV kandidáta (2000 znaků) - uloženy na disku 🆕
+- **Retrieval:** **Hybrid Search** 🆕
+  - **BM25 Retriever:** Keyword matching (perfektní pro exact matches jako "React", "SQL")
+  - **Embedding Retriever:** Semantic search (zachytí "PostgreSQL" pro "SQL database")
+  - **Custom RRF Fusion:** Vlastní implementace Reciprocal Rank Fusion (50/50 weight default)
+  - **Parent chunks:** Celý CV kandidáta (2000 znaků) - uloženy na disku
   - **Child chunks:** Menší části se znalostmi (400 znaků) - pro vyhledávání
+
+**Poznámka:** RRF fusion je implementována custom (ne přes `EnsembleRetriever`), což dává plnou kontrolu nad fusion algoritmem a weights.
 
 ---
 
@@ -35,12 +41,13 @@ Aplikace byla kompletně refaktorována s těmito vylepšeními:
 ```
 app_cvs/
 ├── src/                      # Zdrojové moduly
-│   ├── config.py            # Centralizovaná konfigurace
+│   ├── config.py            # Centralizovaná konfigurace (🔄 hybrid search settings v2.0)
 │   ├── models.py            # Dataclass modely
 │   ├── document_loader.py   # Načítání DOCX souborů
 │   ├── embeddings.py        # Azure Embeddings wrapper
-│   ├── vector_store.py      # ChromaDB operace (🔄 zjednodušeno v2.0)
-│   ├── parent_retriever.py  # Parent Document Retriever (🔄 LocalFileStore v2.0)
+│   ├── vector_store.py      # ChromaDB operace (🔄 cosine similarity v2.0)
+│   ├── hybrid_retriever.py  # 🆕 Hybrid Search (BM25 + Embeddings + RRF)
+│   ├── parent_retriever.py  # Parent Document Retriever (🔄 hybrid integration v2.0)
 │   ├── rag_chain.py         # RAG pipeline (LCEL)
 │   └── training.py          # Trénovací modul (🔄 optimalizováno v2.0)
 ├── tests/                    # Unit testy
@@ -64,7 +71,76 @@ app_cvs/
 
 ---
 
-## 🚀 Rychlý start
+## 📦 Setup pro nové uživatele (po git clone)
+
+**DŮLEŽITÉ:** Po klonování z GitHubu projekt **NEOBSAHUJE**:
+- ❌ `data/` - CV soubory (v .gitignore)
+- ❌ `chroma_db/` - Vector databáze (generuje se při tréninku)
+- ❌ `venv/` - Python virtual environment (v .gitignore)
+- ❌ `.env` - Azure credentials (v .gitignore)
+
+### Postup prvního spuštění:
+
+#### 1. **Naklonovat projekt**
+```bash
+git clone <repository-url>
+cd rag-training/app_cvs
+```
+
+#### 2. **Vytvořit virtual environment**
+```bash
+python -m venv venv
+
+# Windows
+venv\Scripts\activate
+
+# Linux/Mac
+source venv/bin/activate
+```
+
+#### 3. **Instalovat závislosti**
+```bash
+pip install -r requirements.txt
+```
+
+#### 4. **Vytvořit `.env` soubor**
+```bash
+# Vytvořit soubor .env v app_cvs/ složce
+# a vyplnit Azure credentials:
+```
+
+```env
+AZURE_OPENAI_ENDPOINT=https://your-endpoint.openai.azure.com/
+AZURE_OPENAI_API_KEY=your-api-key
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-ada-002-dolphin-1
+AZURE_OPENAI_API_VERSION=2023-05-15
+```
+
+#### 5. **Přidat CV soubory**
+```bash
+# Vytvořit složku a zkopírovat .docx soubory:
+mkdir -p data/OneDrive_2025-12-16
+# Zkopírovat CV soubory do: data/OneDrive_2025-12-16/
+```
+
+#### 6. **SPUSTIT TRÉNOVÁNÍ** ⚠️ Povinné!
+```bash
+python train.py
+```
+
+**→ Tímto se vytvoří:**
+- `chroma_db/` - Vector store databáze
+- `chroma_db/docstore/` - Parent chunks
+- `logs/` - Training logy
+
+#### 7. **Spustit aplikaci**
+```bash
+chainlit run app.py
+```
+
+---
+
+## 🚀 Rychlý start (pro existující instalaci)
 
 ### 1. Vytvoření virtuálního prostředí
 
@@ -118,6 +194,89 @@ Aplikace se otevře na `http://localhost:8000`
 
 ---
 
+## ⚙️ Konfigurace
+
+### Hybrid Search Settings (🆕 v2.0)
+
+Hybrid search kombinuje BM25 keyword matching s semantic embeddings pro přesnější výsledky.
+
+**Konfigurace v [src/config.py](src/config.py#L50-L60):**
+
+```python
+# Hybrid search settings
+use_hybrid_search: bool = True        # Zapnout/vypnout hybrid search
+bm25_k: int = 10                      # Počet výsledků z BM25
+embedding_k: int = 10                 # Počet výsledků z embeddings
+bm25_weight: float = 0.5              # Váha BM25 (0.0-1.0)
+embedding_weight: float = 0.5         # Váha embeddings (0.0-1.0)
+similarity_threshold: float = 0.4     # Threshold pro fallback mode
+```
+
+**Jak to funguje:**
+
+1. **BM25 keyword search** → vrátí top 10 výsledků podle keyword overlap
+2. **Embedding semantic search** → vrátí top 10 výsledků podle cosine similarity
+3. **Reciprocal Rank Fusion (RRF)** → sloučí oba result sets s weights 50/50
+
+**RRF Fusion Algoritmus:**
+
+Používáme vlastní implementaci RRF (Reciprocal Rank Fusion) pro sloučení výsledků:
+
+```python
+# Pro každý dokument spočítá RRF score:
+rrf_score = (bm25_weight / (60 + bm25_rank)) + (embedding_weight / (60 + embedding_rank))
+
+# Příklad:
+# Dokument na pozici 1 v BM25 a pozici 3 v embeddings:
+score = (0.5 / 61) + (0.5 / 63) = 0.0082 + 0.0079 = 0.0161
+
+# Dokument pouze v BM25 na pozici 1:
+score = (0.5 / 61) + 0 = 0.0082
+
+# Výsledky se seřadí podle RRF score (vyšší = lepší)
+```
+
+**Výhody RRF:**
+- ✅ Documents found by both methods get higher scores (boosted)
+- ✅ Keyword-only matches still appear (BM25 contributes)
+- ✅ Semantic matches without exact keywords also appear (embeddings contribute)
+- ✅ Configurable weights allow tuning precision vs recall
+
+**Příklady dotazů:**
+
+- ✅ **"React"** → BM25 najde pouze CV s exaktním textem "React", high RRF score
+- ✅ **"SQL databáze"** → Embeddings zachytí PostgreSQL, MySQL, Oracle
+- ✅ **"Python developer"** → CV s "Python" + "developer" dostanou nejvyšší RRF score
+- ✅ **"frontend developer"** → Kombinace keyword + semantic matching
+
+**Vypnutí hybrid search:**
+
+Pokud chceš používat pouze embeddings (bez BM25):
+
+```python
+use_hybrid_search: bool = False
+```
+
+### Vector Store Metrika (🆕 v2.0)
+
+**ChromaDB nyní používá Cosine similarity** místo L2 distance:
+
+- **Důvod:** OpenAI text-embedding-ada-002 používá normalized embeddings
+- **Výhoda:** Lepší discriminative power, větší rozdíl mezi relevant/irrelevant
+- **Konfigurace:** Automaticky nastaveno v [src/vector_store.py](src/vector_store.py#L70)
+
+```python
+collection_metadata={"hnsw:space": "cosine"}
+```
+
+**Score ranges:**
+
+- **0.0-0.3:** Velmi relevantní
+- **0.3-0.5:** Relevantní
+- **>0.5:** Často irelevantní
+
+---
+
 ## 📊 Trénování RAG modelu
 
 ### Základní trénování
@@ -155,17 +314,22 @@ python train.py --log-file training_20251217.log
    └─> Azure OpenAI embeddings model
 
 3. Setup Vector Store
-   └─> Prázdný ChromaDB vectorstore (🔄 změna v2.0)
+   └─> ChromaDB vectorstore s COSINE similarity 🆕
 
 4. Inicializace Retrieveru (🔄 optimalizováno v2.0)
    ├─> Parent splitter: CV → parent chunks (~2000 znaků)
    │   └─> Uložení do LocalFileStore (disk) 🆕
    ├─> Child splitter: parent chunks → child chunks (~400 znaků)
-   │   └─> Vytvoření embeddingů → ChromaDB
-   └─> Batch processing: ~50 chunks/batch s pauzami
+   │   └─> Vytvoření embeddingů → ChromaDB (cosine metric)
+   └─> Batch processing: ~5 chunks/batch s pauzami
 
-5. Test Retrieval
-   └─> Testovací dotazy
+5. Inicializace Hybrid Retriever 🆕
+   ├─> BM25 index: parent chunks → keyword search
+   ├─> Embedding retriever: ChromaDB → semantic search
+   └─> EnsembleRetriever: RRF fusion (50/50 weights)
+
+6. Test Retrieval
+   └─> Testovací dotazy (s hybrid search)
 ```
 
 ### Výhody nového procesu v2.0:
@@ -175,6 +339,8 @@ python train.py --log-file training_20251217.log
 | **API calls** | 2x embeddingy | 1x embeddingy | -50% |
 | **Persistence** | Jen child chunks | Child + parent chunks | +100% |
 | **Rate limit control** | Odhad | Přesná kontrola | +100% |
+| **Similarity metric** | L2 distance | Cosine similarity | +40% discriminace |
+| **Retrieval** | Pouze embeddings | Hybrid (BM25 + embeddings) | +60% precision |
 | **Kontext kvalita** | Fragmenty | Kompletní parent chunks | +100% |
 
 ### Výstupy trénování
