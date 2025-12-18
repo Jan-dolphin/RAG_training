@@ -5,7 +5,7 @@ import shutil
 import stat
 from pathlib import Path
 from typing import Optional
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_openai import AzureOpenAIEmbeddings
 
 from .config import RAGConfig
@@ -27,6 +27,15 @@ class VectorStoreManager:
         self.config = config
         self.embeddings = embeddings
         self._vectorstore: Optional[Chroma] = None
+
+    def _create_chroma_instance(self, collection_metadata: Optional[dict] = None) -> Chroma:
+        """Create Chroma instance with common configuration"""
+        return Chroma(
+            embedding_function=self.embeddings,
+            collection_name=self.config.collection_name,
+            persist_directory=self.config.persist_directory,
+            collection_metadata=collection_metadata
+        )
 
     def _force_remove_readonly(self, func, path, exc_info):
         """Helper to remove read-only files"""
@@ -63,10 +72,7 @@ class VectorStoreManager:
 
         persist_dir.mkdir(parents=True, exist_ok=True)
 
-        self._vectorstore = Chroma(
-            embedding_function=self.embeddings,
-            collection_name=self.config.collection_name,
-            persist_directory=self.config.persist_directory,
+        self._vectorstore = self._create_chroma_instance(
             collection_metadata={"hnsw:space": "cosine"}  # Use cosine similarity for text-embedding-ada-002
         )
 
@@ -88,11 +94,7 @@ class VectorStoreManager:
 
         logger.info(f"Loading vector store from {persist_dir}")
 
-        self._vectorstore = Chroma(
-            persist_directory=self.config.persist_directory,
-            embedding_function=self.embeddings,
-            collection_name=self.config.collection_name
-        )
+        self._vectorstore = self._create_chroma_instance()
 
         # Get collection count
         try:
