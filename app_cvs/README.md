@@ -1,17 +1,15 @@
-# CV RAG Application v2.0
+# CV RAG Application v2.1
 
 Produkční RAG aplikace pro vyhledávání informací v životopisech kandidátů s Chainlit frontend.
 
-## 🎯 Co je nového ve verzi 2.0
+## 🎯 Co je nového ve verzi 2.1
 
-Aplikace byla kompletně refaktorována s těmito vylepšeními:
+Aplikace byla aktualizována pro větší robustnost a flexibilitu:
 
-- ✅ **LocalFileStore** - Parent chunks se ukládají na disk (persistence mezi restarty)
-- ✅ **Hybrid Search (BM25 + Embeddings)** - 🆕 Kombinace keyword a semantic search pro přesné výsledky
-- ✅ **Cosine Similarity** - 🆕 Změna metriky z L2 na cosine pro lepší discriminaci
-- ✅ **Optimalizovaný batch processing** - Polovina API calls, přesná kontrola rate limitů
-- ✅ **DRY princip** - Odstranění redundantního kódu (-100 řádků)
-- ✅ **Interaktivní notebooky** - v adresáři `notebooks/`
+- ✅ **Dynamic Retrieval Strategies** - Skládání strategií pomocí boolean flagů in `.env`
+- ✅ **Optimized Rate Limits** - Vyladěno pro Azure OpenAI (zamezení errorům 429)
+- ✅ **Robust Imports** - Aplikace nespadne, i když chybí některé LangChain moduly
+- ✅ **Vylepšený Playground** - Nový `rag_playground.ipynb` pro živé experimentování
 
 📄 **Detailní popis změn:** [CHANGES.md](docs/CHANGES.md)
 
@@ -196,66 +194,40 @@ Aplikace se otevře na `http://localhost:8000`
 
 ## ⚙️ Konfigurace
 
-### Hybrid Search Settings (🆕 v2.0)
+### Retrieval Strategies Configuration (🆕 v2.1)
 
-Hybrid search kombinuje BM25 keyword matching s semantic embeddings pro přesnější výsledky.
+Aplikace nyní používá **dynamické skládání strategií** pomocí boolean flagů. Můžete libovolně kombinovat různé přístupy nastavením proměnných prostředí nebo v `src/config.py`.
 
-**Konfigurace v [src/config.py](src/config.py#L50-L60):**
+**Konfigurace v `.env`:**
 
-```python
-# Hybrid search settings
-use_hybrid_search: bool = True        # Zapnout/vypnout hybrid search
-bm25_k: int = 10                      # Počet výsledků z BM25
-embedding_k: int = 10                 # Počet výsledků z embeddings
-bm25_weight: float = 0.5              # Váha BM25 (0.0-1.0)
-embedding_weight: float = 0.5         # Váha embeddings (0.0-1.0)
-similarity_threshold: float = 0.4     # Threshold pro fallback mode
+```env
+# Základní strategie
+USE_PARENT_DOCUMENT_RETRIEVAL=true  # Použít ParentDocument (True) nebo Vector (False)
+USE_SELF_QUERY=false                # Použít Metadata filtering (SelfQuery)
+
+# Rozšiřující strategie (wrappers)
+USE_HYBRID_SEARCH=true              # Přidat BM25 keyword search (Ensemble)
+USE_MULTI_QUERY=false               # Přidat generování alternativních dotazů (LLM)
+USE_CONTEXTUAL_COMPRESSION=false    # Přidat re-ranking a kompresi (LLM)
 ```
 
-**Jak to funguje:**
+**Jak to funguje (Dynamic Chaining):**
 
-1. **BM25 keyword search** → vrátí top 10 výsledků podle keyword overlap
-2. **Embedding semantic search** → vrátí top 10 výsledků podle cosine similarity
-3. **Reciprocal Rank Fusion (RRF)** → sloučí oba result sets s weights 50/50
+Retriever se staví dynamicky v tomto pořadí:
 
-**RRF Fusion Algoritmus:**
+1. **Base Tier:** Vybere se buď `ParentDocumentRetriever` (default) nebo `VectorStoreRetriever` (pokud je parent vypnutý), případně `SelfQueryRetriever`.
+2. **Hybrid Tier:** Pokud je `USE_HYBRID_SEARCH=true`, base retriever se zabalí do `EnsembleRetriever` (kombinace s BM25).
+3. **Query Translation Tier:** Pokud je `USE_MULTI_QUERY=true`, retriever se zabalí do `MultiQueryRetriever` (generuje 3 různé varianty dotazu).
+4. **Post-Processing Tier:** Pokud je `USE_CONTEXTUAL_COMPRESSION=true`, výsledek se prožene přes `ContextualCompressionRetriever` (filtruje irelevantní pasáže pomocí LLM).
 
-Používáme vlastní implementaci RRF (Reciprocal Rank Fusion) pro sloučení výsledků:
-
-```python
-# Pro každý dokument spočítá RRF score:
-rrf_score = (bm25_weight / (60 + bm25_rank)) + (embedding_weight / (60 + embedding_rank))
-
-# Příklad:
-# Dokument na pozici 1 v BM25 a pozici 3 v embeddings:
-score = (0.5 / 61) + (0.5 / 63) = 0.0082 + 0.0079 = 0.0161
-
-# Dokument pouze v BM25 na pozici 1:
-score = (0.5 / 61) + 0 = 0.0082
-
-# Výsledky se seřadí podle RRF score (vyšší = lepší)
+**Příklad kombinace "Maximum Power":**
+```bash
+USE_PARENT_DOCUMENT_RETRIEVAL=true
+USE_HYBRID_SEARCH=true
+USE_MULTI_QUERY=true
+USE_CONTEXTUAL_COMPRESSION=true
 ```
-
-**Výhody RRF:**
-- ✅ Documents found by both methods get higher scores (boosted)
-- ✅ Keyword-only matches still appear (BM25 contributes)
-- ✅ Semantic matches without exact keywords also appear (embeddings contribute)
-- ✅ Configurable weights allow tuning precision vs recall
-
-**Příklady dotazů:**
-
-- ✅ **"React"** → BM25 najde pouze CV s exaktním textem "React", high RRF score
-- ✅ **"SQL databáze"** → Embeddings zachytí PostgreSQL, MySQL, Oracle
-- ✅ **"Python developer"** → CV s "Python" + "developer" dostanou nejvyšší RRF score
-- ✅ **"frontend developer"** → Kombinace keyword + semantic matching
-
-**Vypnutí hybrid search:**
-
-Pokud chceš používat pouze embeddings (bez BM25):
-
-```python
-use_hybrid_search: bool = False
-```
+*Tato kombinace je nejpřesnější, ale nejpomalejší a nejnákladnější na tokeny.*
 
 ### Vector Store Metrika (🆕 v2.0)
 
@@ -431,12 +403,12 @@ class AzureConfig:
     llm_deployment: str = "gpt-4o"
     temperature: float = 0.0
 
-    # Rate limiting (🔄 vylepšeno v2.0)
-    max_retries: int = 5
-    retry_delay: float = 1.0
+    # Rate limiting (🔄 vylepšeno v2.1)
+    max_retries: int = 10              # Zvýšeno pro stabilitu
+    retry_delay: float = 2.0
     max_retry_delay: float = 60.0
-    batch_size: int = 5      # Počet CHUNKS na batch (ne CV!) 🆕
-    batch_delay: float = 2.0 # Delay mezi batches
+    batch_size: int = 3                # Sníženo ze 5 na 3 (prevence 429 errors) 🆕
+    batch_delay: float = 5.0           # Zvýšeno z 2.0 na 5.0 (bezpečný delay) 🆕
 ```
 
 ### Tipy pro úpravu parametrů
@@ -445,7 +417,7 @@ class AzureConfig:
 - **Menší `child_chunk_size`** → přesnější vyhledávání, ale méně kontextu
 - **Větší `top_k`** → více kandidátů v odpovědi
 - **Větší `overlap`** → lepší zachycení přechodů mezi chunky
-- **Menší `batch_size`** → bezpečnější proti rate limitům
+- **Menší `batch_size`** → bezpečnější proti rate limitům (zvolte 3 pro Azure Tier S0/S1)
 - **Větší `batch_delay`** → pomalejší training, ale bezpečnější
 
 ---
@@ -637,15 +609,12 @@ Pokud používáte starou verzi:
 - **Query (další):** ~1 sekunda (cache)
 - **Load z disku:** ~1 sekunda 🆕
 
-### Srovnání v1.0 vs v2.0
-
-| Metrika | v1.0 | v2.0 | Zlepšení |
-|---------|------|------|----------|
-| API calls (training) | 2x embeddingy | 1x embeddingy | **-50%** |
-| Kontext kvalita | Fragmenty | Parent chunks | **+100%** |
-| Persistence | Jen child chunks | Child + parent | **+100%** |
-| Kód (řádky) | ~500 | ~400 | **-20%** |
-| Rate limit control | Odhadem | Přesně | **+100%** |
+| Aspekt | v2.0 | v2.1 | Zlepšení |
+|--------|------|------|----------|
+| **API calls** | 1x embeddingy | 1x embeddingy | - |
+| **Strategy Config** | Hardcoded | **Boolean Config** | Flexibilita |
+| **Rate Limit** | Batch=5, Delay=2s | **Batch=3, Delay=5s** | Stabilita |
+| **Robustnost** | Chybí imports | **Safe Imports** | No crashes |
 
 ---
 
@@ -684,6 +653,6 @@ MIT License
 
 ---
 
-**Verze:** 2.0
-**Datum:** 2025-12-17
-**Autor:** Claude (Anthropic)
+**Verze:** 2.1
+**Datum:** 2025-12-19
+**Autor:** Claude (Anthropic) & Gemini (Google)
