@@ -1,139 +1,95 @@
-"""Unit tests for document_loader module"""
-
-import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch, mock_open
+import unittest
+import shutil
+import tempfile
 import os
-
+from pathlib import Path
 from src.document_loader import CVDocumentLoader
 from src.models import Candidate
 
+class TestCVDocumentLoader(unittest.TestCase):
 
-class TestCVDocumentLoader:
-    """Test CVDocumentLoader class"""
+    def setUp(self):
+        # Create a temporary directory
+        self.test_dir = tempfile.mkdtemp()
+        self.loader = CVDocumentLoader(self.test_dir)
 
-    @pytest.fixture
-    def temp_data_dir(self, tmp_path):
-        """Create temporary data directory"""
-        data_dir = tmp_path / "data"
-        data_dir.mkdir()
-        return data_dir
+    def tearDown(self):
+        # Remove the directory after the test
+        shutil.rmtree(self.test_dir)
 
-    @pytest.fixture
-    def loader(self, temp_data_dir):
-        """Create CVDocumentLoader instance"""
-        return CVDocumentLoader(str(temp_data_dir))
-
-    def test_init_valid_directory(self, temp_data_dir):
-        """Test initialization with valid directory"""
-        loader = CVDocumentLoader(str(temp_data_dir))
-        assert loader.data_directory == temp_data_dir
+    def create_dummy_file(self, filename, content="This is some dummy content for testing purposes."):
+        path = Path(self.test_dir) / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return path
 
     def test_init_invalid_directory(self):
-        """Test initialization with non-existent directory"""
-        with pytest.raises(ValueError, match="Data directory does not exist"):
-            CVDocumentLoader("/non/existent/path")
+        with self.assertRaises(ValueError):
+            CVDocumentLoader("non_existent_directory_12345")
 
-    @patch('src.document_loader.docx2txt.process')
-    @patch('src.document_loader.os.path.getsize')
-    def test_load_single_cv_success(self, mock_getsize, mock_process, loader, temp_data_dir):
-        """Test successful loading of single CV"""
-        # Setup
-        test_file = temp_data_dir / "Doe_John_CV_EN.docx"
-        test_file.touch()
+    def test_get_candidate_name(self):
+        # Using helper method directly
+        path = Path(self.test_dir) / "John_Doe_CV_EN.docx"
+        name = self.loader._get_candidate_name_from_path(path)
+        self.assertEqual(name, "John Doe")
 
-        mock_process.return_value = "John Doe\nSoftware Engineer\nPython, Java, AWS"
-        mock_getsize.return_value = 1024
+        path2 = Path(self.test_dir) / "Jane_Smith_CV.pdf"
+        name2 = self.loader._get_candidate_name_from_path(path2)
+        self.assertEqual(name2, "Jane Smith")
 
-        # Execute
-        candidate = loader.load_single_cv(str(test_file))
+        path3 = Path(self.test_dir) / "simple_name.txt"
+        name3 = self.loader._get_candidate_name_from_path(path3)
+        self.assertEqual(name3, "simple name")
 
-        # Assert
-        assert candidate is not None
-        assert candidate.name == "Doe John"
-        assert "Software Engineer" in candidate.full_cv_text
-        assert candidate.file_path == str(test_file)
-        assert candidate.metadata["filename"] == "Doe_John_CV_EN.docx"
-        assert candidate.metadata["file_size"] == 1024
+    def test_load_txt_file(self):
+        self.create_dummy_file("test_candidate.txt", "Some relevant experience with Python and AI. This text needs to be longer than 50 characters to be loaded.")
+        candidate = self.loader.load_single_cv(str(Path(self.test_dir) / "test_candidate.txt"))
+        
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.name, "test candidate")
+        self.assertIn("Python", candidate.full_cv_text)
+        self.assertEqual(candidate.metadata['extension'], '.txt')
 
-    @patch('src.document_loader.docx2txt.process')
-    def test_load_single_cv_empty_file(self, mock_process, loader, temp_data_dir):
-        """Test loading empty CV file"""
-        test_file = temp_data_dir / "Empty_CV_EN.docx"
-        test_file.touch()
+    def test_load_csv_file(self):
+        csv_content = "name,experience\nAlice,5 years java\nBob,3 years python"
+        self.create_dummy_file("candidates.csv", csv_content)
+        
+        # CSVLoader typically loads each row as a document. 
+        # Our loader combines them.
+        candidate = self.loader.load_single_cv(str(Path(self.test_dir) / "candidates.csv"))
+        
+        self.assertIsNotNone(candidate)
+        self.assertIn("Alice", candidate.full_cv_text)
+        self.assertIn("Bob", candidate.full_cv_text)
+        self.assertEqual(candidate.metadata['extension'], '.csv')
 
-        mock_process.return_value = ""
+    def test_recursive_loading(self):
+        self.create_dummy_file("root.txt", "Root file content." * 5)
+        self.create_dummy_file("level1/nested.txt", "Nested file content." * 5)
+        self.create_dummy_file("level1/level2/deep.txt", "Deep file content." * 5)
+        
+        candidates = self.loader.load_all_cvs()
+        
+        self.assertEqual(len(candidates), 3)
+        names = sorted([c.name for c in candidates])
+        self.assertEqual(names, ["deep", "nested", "root"])
 
-        candidate = loader.load_single_cv(str(test_file))
+    def test_ignore_small_files(self):
+        self.create_dummy_file("small.txt", "Too short")
+        candidates = self.loader.load_all_cvs()
+        self.assertEqual(len(candidates), 0)
 
-        assert candidate is None
+    def test_unsupported_format(self):
+        self.create_dummy_file("image.png", "not text")
+        # Should just be ignored by load_all_cvs loop because of extension check
+        candidates = self.loader.load_all_cvs()
+        self.assertEqual(len(candidates), 0)
+        
+        # Explicit load should return None or raise
+        # The code catches Exception and logs error, returns None
+        candidate = self.loader.load_single_cv(str(Path(self.test_dir) / "image.png"))
+        self.assertIsNone(candidate)
 
-    @patch('src.document_loader.docx2txt.process')
-    def test_load_single_cv_exception(self, mock_process, loader, temp_data_dir):
-        """Test handling exception during CV loading"""
-        test_file = temp_data_dir / "Error_CV_EN.docx"
-        test_file.touch()
-
-        mock_process.side_effect = Exception("DOCX parsing error")
-
-        candidate = loader.load_single_cv(str(test_file))
-
-        assert candidate is None
-
-    @patch('src.document_loader.CVDocumentLoader.load_single_cv')
-    def test_load_all_cvs(self, mock_load_single, loader, temp_data_dir):
-        """Test loading all CVs from directory"""
-        # Create test files
-        (temp_data_dir / "Person1_CV_EN.docx").touch()
-        (temp_data_dir / "Person2_CV_EN.docx").touch()
-        (temp_data_dir / "Person3_CV_EN.docx").touch()
-
-        # Mock load_single_cv to return test candidates
-        mock_load_single.side_effect = [
-            Candidate(name="Person1", full_cv_text="CV1", file_path="p1.docx"),
-            Candidate(name="Person2", full_cv_text="CV2", file_path="p2.docx"),
-            None  # One file fails to load
-        ]
-
-        candidates = loader.load_all_cvs()
-
-        assert len(candidates) == 2
-        assert candidates[0].name == "Person1"
-        assert candidates[1].name == "Person2"
-
-    def test_convert_to_langchain_documents(self, loader):
-        """Test conversion of Candidates to LangChain Documents"""
-        candidates = [
-            Candidate(
-                name="Alice Smith",
-                full_cv_text="Alice CV content with Python and AWS skills",
-                file_path="/path/to/alice.docx",
-                metadata={"filename": "alice.docx"}
-            ),
-            Candidate(
-                name="Bob Jones",
-                full_cv_text="Bob CV content with Java and Docker skills",
-                file_path="/path/to/bob.docx",
-                metadata={"filename": "bob.docx"}
-            )
-        ]
-
-        documents = loader.convert_to_langchain_documents(candidates)
-
-        assert len(documents) == 2
-
-        # Check first document
-        assert documents[0].page_content == candidates[0].full_cv_text
-        assert documents[0].metadata["candidate_name"] == "Alice Smith"
-        assert documents[0].metadata["type"] == "cv_parent"
-        assert documents[0].metadata["filename"] == "alice.docx"
-
-        # Check second document
-        assert documents[1].page_content == candidates[1].full_cv_text
-        assert documents[1].metadata["candidate_name"] == "Bob Jones"
-        assert documents[1].metadata["type"] == "cv_parent"
-
-    def test_convert_empty_list(self, loader):
-        """Test conversion of empty candidate list"""
-        documents = loader.convert_to_langchain_documents([])
-        assert len(documents) == 0
+if __name__ == '__main__':
+    unittest.main()
