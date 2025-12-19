@@ -13,6 +13,9 @@ from .embeddings import EmbeddingsManager
 from .vector_store import VectorStoreManager
 from .parent_retriever import CVParentRetriever
 from .models import TrainingMetrics
+from .retriever_factory import RetrieverFactory
+from langchain_openai import AzureChatOpenAI
+from langchain_core.retrievers import BaseRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -237,16 +240,16 @@ class TrainingPipeline:
             self.metrics.add_error(f"Retriever initialization failed: {str(e)}")
             raise
 
-    def test_retrieval(self, retriever: CVParentRetriever, test_queries: Optional[list] = None) -> None:
+    def test_retrieval(self, retriever: BaseRetriever, test_queries: Optional[list] = None) -> None:
         """
-        Test retrieval with sample queries
+        Test retrieval with sample queries using the configured strategy
 
         Args:
-            retriever: Parent retriever instance
+            retriever: Initialized retriever (BaseRetriever compatible)
             test_queries: Optional list of test queries
         """
         logger.info("\n" + "-" * 80)
-        logger.info("STEP 5: Testing Retrieval")
+        logger.info("STEP 5: Testing Retrieval (Strategy Check)")
         logger.info("-" * 80)
 
         if test_queries is None:
@@ -260,10 +263,13 @@ class TrainingPipeline:
             try:
                 logger.info(f"\nTest Query: '{query}'")
 
-                results = retriever.retrieve(query, top_k=3)
-
+                # Use standard invoke
+                results = retriever.invoke(query)
+                # Limit manually if retriever doesn't support top_k arg directly in invoke
+                # (Factory retrievers usually configured with k)
+                
                 logger.info(f"  Retrieved {len(results)} results:")
-                for i, doc in enumerate(results, 1):
+                for i, doc in enumerate(results[:3], 1): # Show top 3
                     candidate_name = doc.metadata.get("candidate_name", "Unknown")
                     content_preview = doc.page_content[:100].replace("\n", " ")
                     logger.info(f"    {i}. {candidate_name}")
@@ -325,11 +331,41 @@ class TrainingPipeline:
             # Step 3: Setup vector store (empty)
             vs_manager = self.setup_vector_store(embeddings_mgr, clear_existing=True)
 
-            # Step 4: Initialize retriever and populate vectorstore
-            retriever = self.initialize_retriever(loader, vs_manager)
+            # Step 4: Initialize retriever (Index Builder) and populate vectorstore
+            # This uses CVParentRetriever solely for handling the complex Parent/Child indexing logic
+            index_builder = self.initialize_retriever(loader, vs_manager)
 
-            # Step 5: Test retrieval
-            self.test_retrieval(retriever, test_queries)
+            # Step 5: Initialize Retrieval Strategy for Testing
+            # (This is what we use for actual queries)
+            llm = None
+            # Step 5: Initialize Retrieval Strategy for Testing
+            # (This is what we use for actual queries)
+            llm = None
+            # Check if any LLM-dependent strategy is enabled
+            needs_llm = (self.config.rag.use_multi_query or 
+                        self.config.rag.use_contextual_compression or 
+                        self.config.rag.use_self_query)
+            
+            if needs_llm:
+                 # Initialize LLM only if needed for strategy (optimization)
+                 logger.info("Initializing LLM for advanced retrieval strategy...")
+                 llm = AzureChatOpenAI(
+                    azure_deployment=self.config.azure.llm_deployment,
+                    openai_api_version=self.config.azure.api_version,
+                    azure_endpoint=self.config.azure.endpoint,
+                    api_key=self.config.azure.api_key,
+                    temperature=0
+                )
+
+            testing_retriever = RetrieverFactory.create_retriever(
+                self.config,
+                vs_manager.get_vectorstore(),
+                llm=llm,
+                parent_retriever=index_builder
+            )
+
+            # Step 6: Test retrieval
+            self.test_retrieval(testing_retriever, test_queries)
 
             # Calculate duration
             self.metrics.duration_seconds = time.time() - start_time
@@ -342,6 +378,16 @@ class TrainingPipeline:
             logger.info(f"Parent Chunks: {self.metrics.total_parent_chunks}")
             logger.info(f"Child Chunks: {self.metrics.total_child_chunks}")
             logger.info(f"Errors: {len(self.metrics.errors)}")
+            
+            # Log active strategies
+            active_strategies = []
+            if self.config.rag.use_parent_document_retrieval: active_strategies.append("ParentDocument")
+            else: active_strategies.append("Vector")
+            if self.config.rag.use_hybrid_search: active_strategies.append("Hybrid")
+            if self.config.rag.use_multi_query: active_strategies.append("MultiQuery")
+            if self.config.rag.use_contextual_compression: active_strategies.append("Compression")
+            
+            logger.info(f"Active Strategy Chain: {' -> '.join(active_strategies)}")
 
             if save_metrics:
                 self.save_metrics()
@@ -352,7 +398,7 @@ class TrainingPipeline:
                 "loader": loader,
                 "embeddings_manager": embeddings_mgr,
                 "vector_store_manager": vs_manager,
-                "retriever": retriever
+                "retriever": testing_retriever # Return the configured strategy retriever
             }
 
         except Exception as e:

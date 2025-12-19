@@ -5,7 +5,11 @@ import shutil
 import stat
 from pathlib import Path
 from typing import Optional
-from langchain_chroma import Chroma
+try:
+    from langchain_chroma import Chroma
+except ImportError:
+    from langchain_community.vectorstores import Chroma
+
 from langchain_openai import AzureOpenAIEmbeddings
 
 from .config import RAGConfig

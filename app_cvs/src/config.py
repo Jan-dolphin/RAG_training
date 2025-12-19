@@ -19,11 +19,11 @@ class AzureConfig:
     temperature: float = 0.0
 
     # Rate limiting settings
-    max_retries: int = 5
-    retry_delay: float = 1.0  # Initial delay in seconds
-    max_retry_delay: float = 60.0  # Max delay between retries
-    batch_size: int = 5  # Number of documents to process at once
-    batch_delay: float = 2.0  # Delay between batches in seconds
+    max_retries: int = 10  # Increased from 5
+    retry_delay: float = 2.0  # Increased from 1.0
+    max_retry_delay: float = 60.0
+    batch_size: int = 3  # Reduced from 5
+    batch_delay: float = 5.0  # Increased from 2.0
 
     def validate(self) -> None:
         """Validate required configuration fields"""
@@ -47,8 +47,15 @@ class RAGConfig:
     # Retrieval settings
     top_k: int = 5  # Počet dokumentů k vrácení
 
-    # Hybrid search settings
-    use_hybrid_search: bool = True  # Kombinuje BM25 (keyword) + embeddings (semantic)
+    # Retrieval Configuration
+    # Dynamic Strategy Composition Flags
+    use_parent_document_retrieval: bool = field(default_factory=lambda: os.getenv("USE_PARENT_DOCUMENT_RETRIEVAL", "true").lower() == "true")
+    use_hybrid_search: bool = field(default_factory=lambda: os.getenv("USE_HYBRID_SEARCH", "true").lower() == "true")
+    use_multi_query: bool = field(default_factory=lambda: os.getenv("USE_MULTI_QUERY", "false").lower() == "true")
+    use_contextual_compression: bool = field(default_factory=lambda: os.getenv("USE_CONTEXTUAL_COMPRESSION", "false").lower() == "true")
+    use_self_query: bool = field(default_factory=lambda: os.getenv("USE_SELF_QUERY", "false").lower() == "true")
+
+    # Hybrid search settings (Ensemble)
     bm25_k: int = 10  # Počet výsledků z BM25 keyword search
     embedding_k: int = 10  # Počet výsledků z embedding search
     bm25_weight: float = 0.5  # Váha BM25 při fúzi (0.0-1.0)
@@ -56,8 +63,6 @@ class RAGConfig:
 
     # Similarity threshold (používá se pro non-hybrid fallback)
     similarity_threshold: float = 0.4  # Max cosine distance pro relevantní výsledky
-    # Poznámka: ChromaDB používá cosine similarity
-    # 0.0-0.3: velmi relevantní, 0.3-0.5: relevantní, >0.5: často irelevantní
 
     # Vector store settings
     collection_name: str = "cv_candidates"

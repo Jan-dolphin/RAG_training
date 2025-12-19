@@ -323,6 +323,19 @@ class CVParentRetriever:
 
         return results
 
+    def invoke(self, input: str, config: Optional[dict] = None) -> List[Document]:
+        """
+        LangChain Runnable interface support.
+        Delegates to retrieve().
+        """
+        # Input can be a string or a dict usually, but standard retrievers take string query
+        query = input
+        if isinstance(input, dict):
+             # Handle dict input (e.g. from a chain that passes inputs)
+             query = input.get("query", str(input))
+
+        return self.retrieve(query)
+
     def retrieve_with_scores(self, query: str, top_k: Optional[int] = None) -> List[RetrievalResult]:
         """
         Retrieve documents with similarity scores

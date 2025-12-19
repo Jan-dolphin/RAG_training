@@ -78,6 +78,7 @@ class EmbeddingsManager:
                 api_key=self.config.api_key,
                 azure_deployment=self.config.embedding_deployment,
                 openai_api_version=self.config.api_version,
+                max_retries=self.config.max_retries
             )
 
             logger.info("Embeddings initialized successfully")

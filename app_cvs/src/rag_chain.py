@@ -7,6 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
 
 from .config import AzureConfig
 from .parent_retriever import CVParentRetriever
@@ -33,13 +34,13 @@ Question: {question}
 
 Answer in a clear and concise manner. When mentioning candidates, always include their names."""
 
-    def __init__(self, config: AzureConfig, retriever: CVParentRetriever, prompt_template: Optional[str] = None):
+    def __init__(self, config: AzureConfig, retriever: BaseRetriever, prompt_template: Optional[str] = None):
         """
         Initialize RAG Chain
 
         Args:
             config: Azure configuration
-            retriever: Parent document retriever
+            retriever: LangChain BaseRetriever (or compatible interface)
             prompt_template: Custom prompt template (uses default if None)
         """
         self.config = config
@@ -91,9 +92,10 @@ Answer in a clear and concise manner. When mentioning candidates, always include
         """
         prompt = ChatPromptTemplate.from_template(self.prompt_template)
 
+        # Note: self.retriever must support Runnable interface (invoke)
         chain = (
             {
-                "context": lambda x: self._format_docs(self.retriever.retrieve(x)),
+                "context": lambda x: self._format_docs(self.retriever.invoke(x)),
                 "question": RunnablePassthrough()
             }
             | prompt
@@ -110,18 +112,15 @@ Answer in a clear and concise manner. When mentioning candidates, always include
 
         Args:
             query: User question about CVs
-            use_relevance_filter: If True, filter out irrelevant results
+            use_relevance_filter: Deprecated/Ignored. Filtering is now handled by the retriever strategy.
 
         Returns:
             RAGResponse with answer and retrieved contexts
         """
-        logger.info(f"Processing query: '{query}' (relevance_filter={use_relevance_filter})")
+        logger.info(f"Processing query: '{query}'")
 
-        # Retrieve documents (with or without relevance filtering)
-        if use_relevance_filter:
-            retrieved_docs = self.retriever.retrieve_relevant(query)
-        else:
-            retrieved_docs = self.retriever.retrieve(query)
+        # Retrieve documents using standard invoke
+        retrieved_docs = self.retriever.invoke(query)
 
         # Check if we have relevant results
         if not retrieved_docs:
@@ -133,7 +132,6 @@ Answer in a clear and concise manner. When mentioning candidates, always include
                 metadata={
                     "num_contexts": 0,
                     "llm_model": self.config.llm_deployment,
-                    "relevance_filter": use_relevance_filter,
                     "no_relevant_results": True
                 }
             )
